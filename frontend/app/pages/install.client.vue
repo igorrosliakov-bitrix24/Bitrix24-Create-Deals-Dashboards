@@ -13,7 +13,7 @@ useHead({
   title: t('page.install.seo.title')
 })
 
-// region Init ////
+// region Инициализация ////
 const config = useRuntimeConfig()
 const appUrl = withoutTrailingSlash(config.public.appUrl)
 
@@ -30,9 +30,76 @@ const progressColor = ref<ProgressProps['color']>('air-primary')
 const progressValue = ref<null | number>(null)
 
 const apiStore = useApiStore()
+
+/**
+ * [NEW BLOCK]
+ * Преобразует ошибку SDK/сети в компактную диагностическую строку.
+ * Используется в логах install-шагов для анализа падений placement.
+ */
+// Форматирует ошибки SDK/сети в одну читаемую строку для диагностики установки.
+function describeAjaxError(error: any): string {
+  try {
+    const responseData = error?.response?.data || error?.data || error?.answer
+    const payload = typeof responseData === 'string' ? responseData : JSON.stringify(responseData)
+    const code = error?.error || error?.code || error?.status || 'unknown'
+    const message = error?.message || error?.description || 'Unknown error'
+    return `[code=${code}] ${message}; payload=${payload || 'n/a'}`
+  } catch {
+    return String(error?.message || error || 'Unknown error')
+  }
+}
+
+/**
+ * [NEW BLOCK]
+ * Нормализует регистр ключей записи placement для разных порталов.
+ */
+// Нормализует записи placement, так как регистр ключей в ответах может отличаться.
+function normalizePlacement(item: any): { PLACEMENT: string, HANDLER: string } {
+  return {
+    PLACEMENT: item?.PLACEMENT || item?.placement || '',
+    HANDLER: item?.HANDLER || item?.handler || ''
+  }
+}
+
+/**
+ * [NEW BLOCK]
+ * Безопасная обёртка над placement.get.
+ * Не бросает исключение: возвращает null при ошибке и пишет предупреждение с контекстом.
+ */
+async function readPlacementListSafe(context: string): Promise<any[] | null> {
+  try {
+    const response = await $b24.callBatch({
+      placementList: { method: 'placement.get' }
+    })
+    const placementList = response.getData()?.placementList || []
+    $logger.info(`[${context}] placement.get success`, placementList)
+    return placementList
+  } catch (error) {
+    $logger.warn(`[${context}] placement.get failed. ${describeAjaxError(error)}`, error)
+    return null
+  }
+}
+
+/**
+ * [NEW BLOCK]
+ * Унифицированный placement.bind для вкладок дашборда в install-шаге.
+ */
+async function bindDashboardPlacement(placement: string, handlerPath: string): Promise<void> {
+  // Централизованный bind для единообразной регистрации вкладок контакта и компании.
+  const handler = `${appUrl}${handlerPath}`
+  const result = await $b24.callBatch([{
+    method: 'placement.bind',
+    params: {
+      PLACEMENT: placement,
+      HANDLER: handler,
+      TITLE: 'Deals Dashboard'
+    }
+  }])
+  $logger.info(`placement.bind success: ${placement}`, result?.getData?.() || {})
+}
 // endregion ////
 
-// region Steps ////
+// region Шаги ////
 const steps = ref<Record<string, IStep>>({
   init: {
     caption: t('page.install.step.init.caption'),
@@ -48,7 +115,7 @@ const steps = ref<Record<string, IStep>>({
   //   caption: t('page.install.step.events.caption'),
   //   action: async () => {
   //     /**
-  //      * Registering onAppInstall | onAppUninstall
+  //      * Регистрация onAppInstall | onAppUninstall
   //      */
   //     await $b24.callBatch([
   //       {
@@ -85,19 +152,43 @@ const steps = ref<Record<string, IStep>>({
   placement: {
     caption: t('page.install.step.placement.caption'),
     action: async () => {
-      const key = {
-        placement: 'CRM_DEAL_DETAIL_TAB',
-        handler: `${appUrl}/handler/placement-crm-deal-detail-tab`
-      }
-      const exists = (steps.value.init?.data?.placementList as { placement: string, handler: string }[]).some(item => item.placement === key.placement && item.handler === key.handler )
-      if (exists) {
-        await $b24.callBatch([
-          {
-            method: 'placement.unbind',
-            params: {
-              PLACEMENT: key.placement
+      /**
+       * [REPLACED BLOCK]
+       * Этот шаг обёрнут в try/catch, чтобы install-flow не падал,
+       * если методы placement недоступны или ограничены правами.
+       */
+      try {
+        const key = {
+          placement: 'CRM_DEAL_DETAIL_TAB',
+          handler: `${appUrl}/handler/placement-crm-deal-detail-tab`
+        }
+        const placementList = (steps.value.init?.data?.placementList as any[]) || []
+        const exists = placementList.some(item => item.placement === key.placement && item.handler === key.handler )
+        if (exists) {
+          await $b24.callBatch([
+            {
+              method: 'placement.unbind',
+              params: {
+                PLACEMENT: key.placement
+              }
+            },
+            {
+              method: 'placement.bind',
+              params: {
+                PLACEMENT: key.placement,
+                HANDLER: key.handler,
+                TITLE: '[demo] Some Tab',
+                OPTIONS: {
+                  errorHandlerUrl: `${appUrl}/handler/background-some-problem`
+                }
+              }
             }
-          },
+          ])
+
+          return
+        }
+
+        await $b24.callBatch([
           {
             method: 'placement.bind',
             params: {
@@ -110,23 +201,60 @@ const steps = ref<Record<string, IStep>>({
             }
           }
         ])
-
-        return
+      } catch (error) {
+        $logger.warn('placement.bind for CRM_DEAL_DETAIL_TAB failed')
       }
-
-      await $b24.callBatch([
-        {
-          method: 'placement.bind',
-          params: {
-            PLACEMENT: key.placement,
-            HANDLER: key.handler,
-            TITLE: '[demo] Some Tab',
-            OPTIONS: {
-              errorHandlerUrl: `${appUrl}/handler/background-some-problem`
-            }
-          }
+    }
+  },
+  dashboardContact: {
+    caption: 'Register Contact Dashboard',
+    action: async () => {
+      try {
+        /**
+         * [REPLACED BLOCK]
+         * Предыдущее поведение:
+         * - fire-and-forget вызов placement.bind.
+         * Текущее поведение:
+         * - bind через общий helper.
+         * - read-back верификация через placement.get.
+         */
+        // Привязка + мгновенная проверка через повторное чтение, что install реально зарегистрировал вкладку.
+        await bindDashboardPlacement('CRM_CONTACT_DETAIL_TAB', '/handler/dashboard-contact')
+        const placementList = await readPlacementListSafe('dashboardContact')
+        if (placementList) {
+          const exists = placementList.some((p: any) => {
+            const n = normalizePlacement(p)
+            return n.PLACEMENT === 'CRM_CONTACT_DETAIL_TAB' && n.HANDLER === `${appUrl}/handler/dashboard-contact`
+          })
+          $logger.info(`dashboardContact verify: ${exists ? 'registered' : 'not found'}`)
         }
-      ])
+      } catch (error) {
+        $logger.warn(`CRM_CONTACT_DETAIL_TAB placement failed. ${describeAjaxError(error)}`, error)
+      }
+    }
+  },
+  dashboardCompany: {
+    caption: 'Register Company Dashboard',
+    action: async () => {
+      try {
+        /**
+         * [REPLACED BLOCK]
+         * Та же стратегия замены, что и в dashboardContact:
+         * bind + verify вместо «слепого» bind.
+         */
+        // Привязка + мгновенная проверка через повторное чтение, что install реально зарегистрировал вкладку.
+        await bindDashboardPlacement('CRM_COMPANY_DETAIL_TAB', '/handler/dashboard-company')
+        const placementList = await readPlacementListSafe('dashboardCompany')
+        if (placementList) {
+          const exists = placementList.some((p: any) => {
+            const n = normalizePlacement(p)
+            return n.PLACEMENT === 'CRM_COMPANY_DETAIL_TAB' && n.HANDLER === `${appUrl}/handler/dashboard-company`
+          })
+          $logger.info(`dashboardCompany verify: ${exists ? 'registered' : 'not found'}`)
+        }
+      } catch (error) {
+        $logger.warn(`CRM_COMPANY_DETAIL_TAB placement failed. ${describeAjaxError(error)}`, error)
+      }
     }
   },
   userFields: {
@@ -174,7 +302,7 @@ const steps = ref<Record<string, IStep>>({
   //   caption: t('page.install.step.crm.caption'),
   //   action: async () => {
   //     /**
-  //      * Some actions for crm
+  //      * Пример действий для CRM
   //      */
   //     if (steps.value.crm) {
   //       steps.value.crm.data = {
@@ -190,7 +318,7 @@ const steps = ref<Record<string, IStep>>({
     action: async () => {
       const authData = $b24.auth.getAuthData()
 
-      if(authData === false) {
+      if (authData === false) {
         throw new Error('Some problem with auth. See App logic')
       }
 
@@ -224,47 +352,52 @@ const steps = ref<Record<string, IStep>>({
 const stepCode = ref<string>('init' as const)
 // endregion ////
 
-// region Actions ////
+// region Действия ////
 async function makeInit(): Promise<void> {
   if (steps.value.init) {
+    /**
+     * [REPLACED BLOCK]
+     * Предыдущее поведение:
+     * - один callBatch с appInfo/profile/userfieldtype.list/placement.get.
+     * Текущее поведение:
+     * - сначала запрашиваем appInfo/profile.
+     * - userfieldtype.list и placement.get запрашиваем безопасно в отдельных try/catch.
+     * Зачем:
+     * - избежать полного падения init, если опциональные методы недоступны.
+     *
+     * [REMOVED LEGACY BLOCK]
+     * - Удалён старый монолитный блок присвоений в пользу более устойчивой композиции.
+     */
+    let userFieldTypeListData: any[] = []
+    let placementListData: any[] = []
+
     const response = await $b24.callBatch({
       appInfo: { method: 'app.info' },
-      profile: { method: 'profile' },
-      userFieldTypeList: { method: 'userfieldtype.list' },
-      placementList: { method: 'placement.get' }
+      profile: { method: 'profile' }
     })
 
-    steps.value.init.data = response.getData() as {
-      appInfo: {
-        ID: number
-        CODE: string
-        VERSION: string
-        STATUS: string
-        LICENSE: string
-        LICENSE_FAMILY: string
-        INSTALLED: boolean
-      },
-      profile: {
-        ID: number
-        ADMIN: boolean
-        LAST_NAME?: string
-        NAME?: string
-      }
-      userFieldTypeList: {
-        USER_TYPE_ID: string
-        HANDLER: string
-        TITLE: string
-        DESCRIPTION: string
-      }[]
-      placementList: {
-        placement: string
-        userId: number
-        handler: string
-        options: any
-        title: string
-        description: string
-      }[]
+    try {
+      const userFieldResponse = await $b24.callBatch({
+        userFieldTypeList: { method: 'userfieldtype.list' }
+      })
+      userFieldTypeListData = userFieldResponse.getData()?.userFieldTypeList || []
+    } catch (e) {
+      $logger.warn('userfieldtype.list unavailable')
     }
+
+    try {
+      placementListData = await readPlacementListSafe('makeInit') || []
+    } catch (e) {
+      $logger.warn('placement.get unavailable')
+    }
+
+    const data = response.getData()
+    steps.value.init.data = {
+      appInfo: data.appInfo,
+      profile: data.profile,
+      userFieldTypeList: userFieldTypeListData,
+      placementList: placementListData
+    } as any
   }
 }
 
@@ -288,7 +421,7 @@ const stepsData = computed(() => {
 })
 // endregion ////
 
-// region Lifecycle Hooks ////
+// region Хуки жизненного цикла ////
 onMounted(async () => {
   $logger.info('Hi from install page')
 

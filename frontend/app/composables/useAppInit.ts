@@ -20,8 +20,8 @@ const isInitB24Helper = ref(false)
 const moduleId = 'main'
 
 /**
- * Composable handling application initialization
- * Coordinates data loading via batch request
+ * Компосабл инициализации приложения
+ * Координирует загрузку данных через batch-запрос
  */
 export const useAppInit = (loggerTitle?: string) => {
   const $logger = LoggerBrowser.build(
@@ -29,15 +29,15 @@ export const useAppInit = (loggerTitle?: string) => {
     import.meta.dev
   )
 
-  // Stores
+  // Хранилища
   const appSettings = useAppSettingsStore()
   const userSettings = useUserSettingsStore()
   const user = useUserStore()
   const api = useApiStore()
 
   /**
-   * Initialize application data
-   * Performs batch request and updates all stores
+   * Инициализация данных приложения
+   * Выполняет batch-запрос и обновляет все хранилища
    */
   async function initApp(
     $b24: B24Frame,
@@ -45,6 +45,21 @@ export const useAppInit = (loggerTitle?: string) => {
     setLocale: (locale: Locale) => Promise<void>
   ) {
     $logger.info('InitApp start')
+    /**
+     * [NEW BLOCK]
+     * Назначение:
+     * - Экспортировать инициализированный SDK-экземпляр в консоль браузера в dev-режиме.
+     * Зачем:
+     * - При отладке внутри iframe Bitrix24 глобальный BX24 может быть недоступен.
+     * - Это даёт стабильный диагностический хендл: window.__b24.
+     */
+    // Экспорт SDK только для отладки в браузерной консоли.
+    // Используется для проверки scope/placement без доступа к внутренностям компонента.
+    if (import.meta.client && import.meta.dev) {
+      (window as any).__b24 = $b24
+      $logger.log('Debug SDK handle exported to window.__b24')
+    }
+
     await initLang($b24, localesI18n, setLocale)
 
     await initB24Helper(
@@ -68,7 +83,7 @@ export const useAppInit = (loggerTitle?: string) => {
     $logger.log('Init data >>', data)
 
     /**
-     * @memo This can be used instead of `initB24Helper`
+     * @memo Это можно использовать вместо `initB24Helper`
      */
     // const commands = {
     //   appInfo: { method: 'app.info' },
@@ -82,7 +97,7 @@ export const useAppInit = (loggerTitle?: string) => {
     // const data = response.getData()
     // $logger.log('Init data >>', data)
 
-    // Update stores with received data
+    // Обновляем хранилища полученными данными
     user.initFromBatch({
       id: data.profileData?.data.id ?? undefined,
       name: data.profileData?.data.name ?? undefined,
@@ -122,7 +137,7 @@ export const useAppInit = (loggerTitle?: string) => {
   }
 
   /**
-   * Reloads data
+   * Повторно загружает данные
    */
   async function reloadData() {
     await b24Helper.value?.loadData([
@@ -138,7 +153,7 @@ export const useAppInit = (loggerTitle?: string) => {
 
     $logger.log('Reload data >>', data)
 
-    // Update stores with received data
+    // Обновляем хранилища полученными данными
     appSettings.initFromBatch({
       configSettings: (data.appSettings?.data ?? new Map()).get('configSettings')
     })

@@ -33,3 +33,7 @@ node_modules
 # dev/build outputs
 backend/php/vendor
 
+# my files
+FORENSIC_REPORT.md
+.vscode/settings.json
+CHANGES_SUMMARY.md
