@@ -33,55 +33,6 @@ const apiStore = useApiStore()
 
 /**
  * [NEW BLOCK]
- * Преобразует ошибку SDK/сети в компактную диагностическую строку.
- * Используется в логах install-шагов для анализа падений placement.
- */
-// Форматирует ошибки SDK/сети в одну читаемую строку для диагностики установки.
-function describeAjaxError(error: any): string {
-  try {
-    const responseData = error?.response?.data || error?.data || error?.answer
-    const payload = typeof responseData === 'string' ? responseData : JSON.stringify(responseData)
-    const code = error?.error || error?.code || error?.status || 'unknown'
-    const message = error?.message || error?.description || 'Unknown error'
-    return `[code=${code}] ${message}; payload=${payload || 'n/a'}`
-  } catch {
-    return String(error?.message || error || 'Unknown error')
-  }
-}
-
-/**
- * [NEW BLOCK]
- * Нормализует регистр ключей записи placement для разных порталов.
- */
-// Нормализует записи placement, так как регистр ключей в ответах может отличаться.
-function normalizePlacement(item: any): { PLACEMENT: string, HANDLER: string } {
-  return {
-    PLACEMENT: item?.PLACEMENT || item?.placement || '',
-    HANDLER: item?.HANDLER || item?.handler || ''
-  }
-}
-
-/**
- * [NEW BLOCK]
- * Безопасная обёртка над placement.get.
- * Не бросает исключение: возвращает null при ошибке и пишет предупреждение с контекстом.
- */
-async function readPlacementListSafe(context: string): Promise<any[] | null> {
-  try {
-    const response = await $b24.callBatch({
-      placementList: { method: 'placement.get' }
-    })
-    const placementList = response.getData()?.placementList || []
-    $logger.info(`[${context}] placement.get success`, placementList)
-    return placementList
-  } catch (error) {
-    $logger.warn(`[${context}] placement.get failed. ${describeAjaxError(error)}`, error)
-    return null
-  }
-}
-
-/**
- * [NEW BLOCK]
  * Унифицированный placement.bind для вкладок дашборда в install-шаге.
  */
 async function bindDashboardPlacement(placement: string, handlerPath: string): Promise<void> {
@@ -152,6 +103,7 @@ const steps = ref<Record<string, IStep>>({
   placement: {
     caption: t('page.install.step.placement.caption'),
     action: async () => {
+      // Этот демонстрационный placement оставлен для примера шаблона AI Starter.
       /**
        * [REPLACED BLOCK]
        * Этот шаг обёрнут в try/catch, чтобы install-flow не падал,
@@ -210,26 +162,9 @@ const steps = ref<Record<string, IStep>>({
     caption: 'Register Contact Dashboard',
     action: async () => {
       try {
-        /**
-         * [REPLACED BLOCK]
-         * Предыдущее поведение:
-         * - fire-and-forget вызов placement.bind.
-         * Текущее поведение:
-         * - bind через общий helper.
-         * - read-back верификация через placement.get.
-         */
-        // Привязка + мгновенная проверка через повторное чтение, что install реально зарегистрировал вкладку.
         await bindDashboardPlacement('CRM_CONTACT_DETAIL_TAB', '/handler/dashboard-contact')
-        const placementList = await readPlacementListSafe('dashboardContact')
-        if (placementList) {
-          const exists = placementList.some((p: any) => {
-            const n = normalizePlacement(p)
-            return n.PLACEMENT === 'CRM_CONTACT_DETAIL_TAB' && n.HANDLER === `${appUrl}/handler/dashboard-contact`
-          })
-          $logger.info(`dashboardContact verify: ${exists ? 'registered' : 'not found'}`)
-        }
       } catch (error) {
-        $logger.warn(`CRM_CONTACT_DETAIL_TAB placement failed. ${describeAjaxError(error)}`, error)
+        $logger.warn('CRM_CONTACT_DETAIL_TAB placement failed', error)
       }
     }
   },
@@ -237,23 +172,9 @@ const steps = ref<Record<string, IStep>>({
     caption: 'Register Company Dashboard',
     action: async () => {
       try {
-        /**
-         * [REPLACED BLOCK]
-         * Та же стратегия замены, что и в dashboardContact:
-         * bind + verify вместо «слепого» bind.
-         */
-        // Привязка + мгновенная проверка через повторное чтение, что install реально зарегистрировал вкладку.
         await bindDashboardPlacement('CRM_COMPANY_DETAIL_TAB', '/handler/dashboard-company')
-        const placementList = await readPlacementListSafe('dashboardCompany')
-        if (placementList) {
-          const exists = placementList.some((p: any) => {
-            const n = normalizePlacement(p)
-            return n.PLACEMENT === 'CRM_COMPANY_DETAIL_TAB' && n.HANDLER === `${appUrl}/handler/dashboard-company`
-          })
-          $logger.info(`dashboardCompany verify: ${exists ? 'registered' : 'not found'}`)
-        }
       } catch (error) {
-        $logger.warn(`CRM_COMPANY_DETAIL_TAB placement failed. ${describeAjaxError(error)}`, error)
+        $logger.warn('CRM_COMPANY_DETAIL_TAB placement failed', error)
       }
     }
   },
@@ -386,7 +307,10 @@ async function makeInit(): Promise<void> {
     }
 
     try {
-      placementListData = await readPlacementListSafe('makeInit') || []
+      const placementResponse = await $b24.callBatch({
+        placementList: { method: 'placement.get' }
+      })
+      placementListData = placementResponse.getData()?.placementList || []
     } catch (e) {
       $logger.warn('placement.get unavailable')
     }

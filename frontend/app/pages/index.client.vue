@@ -28,21 +28,6 @@ const DASHBOARD_TITLE = 'Deals Dashboard'
 
 /**
  * [NEW BLOCK]
- * Нормализует записи placement, возвращаемые Bitrix24.
- * Обрабатывает оба формата ключей:
- * - PLACEMENT/HANDLER
- * - placement/handler
- */
-// Нормализует payload placement, так как Bitrix24 может вернуть ключи в верхнем или нижнем регистре.
-function normalizePlacement(item: any): { PLACEMENT: string, HANDLER: string } {
-  return {
-    PLACEMENT: item?.PLACEMENT || item?.placement || '',
-    HANDLER: item?.HANDLER || item?.handler || ''
-  }
-}
-
-/**
- * [NEW BLOCK]
  * Преобразует объект ошибки SDK в читаемую однострочную запись для логов.
  * Полезно для случаев, когда AjaxError имеет статус 200 и скрытый payload.
  */
@@ -69,6 +54,7 @@ async function bindPlacement(
   handler: string
 ): Promise<boolean> {
   try {
+    // callBatch с одним методом используем намеренно: единый стиль вызова и обработки результата.
     const result = await b24.callBatch([{
       method: 'placement.bind',
       params: {
@@ -118,6 +104,7 @@ onMounted(async () => {
     $b24 = await $initializeB24Frame()
     await initApp($b24, localesI18n, setLocale)
 
+    // Заголовок вкладки приложения в слайдере/iframe Bitrix24.
     await $b24.parent.setTitle(t('page.index.seo.title'))
     /**
      * [REPLACED BLOCK]
@@ -146,16 +133,15 @@ onMounted(async () => {
     }
 
     if (placementList === null) {
+      // fallback-ветка: если чтение placement недоступно, всё равно пытаемся зарегистрировать обе вкладки.
       await bindPlacement($b24, CONTACT_PLACEMENT, contactHandler)
       await bindPlacement($b24, COMPANY_PLACEMENT, companyHandler)
     } else {
       const contactExists = placementList.some((p: any) => {
-        const n = normalizePlacement(p)
-        return n.PLACEMENT === CONTACT_PLACEMENT && n.HANDLER === contactHandler
+        return p?.PLACEMENT === CONTACT_PLACEMENT && p?.HANDLER === contactHandler
       })
       const companyExists = placementList.some((p: any) => {
-        const n = normalizePlacement(p)
-        return n.PLACEMENT === COMPANY_PLACEMENT && n.HANDLER === companyHandler
+        return p?.PLACEMENT === COMPANY_PLACEMENT && p?.HANDLER === companyHandler
       })
 
       if (!contactExists) {
