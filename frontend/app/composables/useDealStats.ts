@@ -1,6 +1,16 @@
 import { ref, computed } from 'vue'
 import type { B24Frame } from '@bitrix24/b24jssdk'
 
+/**
+ * ПАСПОРТ ИЗМЕНЕНИЙ ФАЙЛА
+ * ТИП: СОЗДАНИЕ
+ * - Новый composable расчёта KPI по сделкам для вкладок контакта и компании.
+ * - Реализована загрузка всех страниц crm.deal.list и устойчивое определение статуса сделки.
+ * - Добавлен учёт валюты отдельно по каждому KPI-бакету.
+ * УДАЛЕНИЕ:
+ * - Легаси-блока в этом файле не было (файл создан с нуля).
+ */
+
 export interface DealStats {
   revenue: number        // Полученная выручка (выигранные закрытые сделки)
   lost: number           // Потерянная выручка (проигранные закрытые сделки)
@@ -112,6 +122,7 @@ export const useDealStats = (
        */
       // Загружаем все сделки через чанки, чтобы исключить усечение по размеру страницы.
       const deals: any[] = []
+      // Итерируемся по всем страницам ответа API, чтобы не терять сделки при объёме > 50.
       for await (const chunk of b24.fetchListMethod('crm.deal.list', {
         filter: {
           [filterField]: entityId
@@ -128,6 +139,7 @@ export const useDealStats = (
       }
 
       if (deals.length === 0) {
+        // Пустой набор сделок не является ошибкой: возвращаем нулевые KPI.
         return
       }
 

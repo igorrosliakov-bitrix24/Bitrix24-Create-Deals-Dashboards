@@ -45,23 +45,11 @@ export const useAppInit = (loggerTitle?: string) => {
     setLocale: (locale: Locale) => Promise<void>
   ) {
     $logger.info('InitApp start')
-    /**
-     * [NEW BLOCK]
-     * Назначение:
-     * - Экспортировать инициализированный SDK-экземпляр в консоль браузера в dev-режиме.
-     * Зачем:
-     * - При отладке внутри iframe Bitrix24 глобальный BX24 может быть недоступен.
-     * - Это даёт стабильный диагностический хендл: window.__b24.
-     */
-    // Экспорт SDK только для отладки в браузерной консоли.
-    // Используется для проверки scope/placement без доступа к внутренностям компонента.
-    if (import.meta.client && import.meta.dev) {
-      (window as any).__b24 = $b24
-      $logger.log('Debug SDK handle exported to window.__b24')
-    }
 
+    // Локаль ставим до загрузки остального контекста, чтобы UI и ошибки сразу были на корректном языке.
     await initLang($b24, localesI18n, setLocale)
 
+    // Загружаем базовые сущности SDK батчем: приложение, настройки, валюты, профиль пользователя.
     await initB24Helper(
       $b24,
       [
@@ -127,6 +115,7 @@ export const useAppInit = (loggerTitle?: string) => {
     localesI18n: ComputedRef<LocaleObject[]>,
     setLocale: (locale: Locale) => Promise<void>
   ) {
+    // Язык берём из контекста портала Bitrix24, а не из браузера.
     const b24CurrentLang = $b24.getLang()
     if (localesI18n.value.filter(i => i.code === b24CurrentLang).length > 0) {
       await setLocale(b24CurrentLang)
@@ -140,6 +129,7 @@ export const useAppInit = (loggerTitle?: string) => {
    * Повторно загружает данные
    */
   async function reloadData() {
+    // Перезагружаем только то, что может меняться в рантайме без полной переинициализации.
     await b24Helper.value?.loadData([
       LoadDataType.AppOptions,
       LoadDataType.UserOptions,

@@ -3,6 +3,15 @@ import type { B24Frame } from '@bitrix24/b24jssdk'
 import { ref, onMounted, computed } from 'vue'
 import { useDashboard } from '@bitrix24/b24ui-nuxt/utils/dashboard'
 
+/**
+ * ПАСПОРТ ИЗМЕНЕНИЙ ФАЙЛА
+ * ТИП: СОЗДАНИЕ
+ * - Новый placement-handler для вкладки дашборда в карточке компании.
+ * - Подключён фронтенд-расчёт KPI через useDealStats с фильтром COMPANY_ID.
+ * УДАЛЕНИЕ:
+ * - Легаси-блока в этом файле не было (файл создан с нуля).
+ */
+
 definePageMeta({
   layout: 'placement'
 })
@@ -81,6 +90,7 @@ onMounted(async () => {
     dealStats = useDealStats($b24, entityId.value, 'company')
 
     // Устанавливаем размер фрейма
+    // Нужен для корректной высоты контента внутри вкладки Bitrix24.
     await $b24?.parent.fitWindow()
 
     isInit.value = true
@@ -95,6 +105,7 @@ onMounted(async () => {
 })
 
 const handleRefresh = async () => {
+  // Явное ручное обновление KPI по нажатию пользователя.
   if (dealStats) {
     await dealStats.refresh()
   }
